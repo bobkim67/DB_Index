@@ -235,27 +235,38 @@ dart_ DBO/PA EID:
 - **금액 15개**: DBO, PlanAsset, NetDBO, ServiceCost, InterestCost, InterestIncome, NetInterest, BenefitPayment, ActuarialGL, ActuarialGL_Financial, ActuarialGL_Demographic, ActuarialGL_Experience, RetirementBenefitCost, ExpectedContribution, DCPlanCost
 - **범위 3개** (각 Min/Max/Mid): DiscountRate, SalaryGrowth, Duration
 
-### 발췌 키워드
+### 발췌 키워드 & 로직 (v3)
 
 - `PENSION_KEYWORDS_TABLE`: 퇴직연금 TABLE 매칭 (2개+ 히트 시 발췌). `임금인상률` 변형 포함
 - `HIGH_SIGNAL_KEYWORDS`: 1개만 매칭돼도 발췌 (`확정급여채무`, `확정급여부채`, `사외적립자산`, `당기근무원가`)
+- `ASSUMPTION_KEYWORDS`: 1개만 매칭돼도 발췌 + **바스켓 우선 담기** (`할인율`, `할인률`, `임금상승률`, `임금인상률`, `승급률` 등 10개)
 - `PENSION_KEYWORDS_TEXT`: 텍스트 단락 발췌용 (예상기여금, 듀레이션 등)
+
+**v3 발췌 개선 (v2 대비)**:
+1. **ASSUMPTION_KEYWORDS 신설**: 가정/듀레이션 키워드 1개 매칭으로 발췌 허용
+2. **바스켓 우선순위**: priority_tables(가정 키워드 히트) → normal_tables 순서로 담기
+3. **10KB 이상 테이블 스킵**: 재무제표 본문(BS/PL/CF/자본변동표 등) 노이즈 제거. 퇴직연금 핵심 테이블은 최대 ~3KB이므로 손실 없음
+
+**v2 문제점 (v3에서 해결)**:
+- 현금흐름표(101KB), 재무상태표(50KB) 등 거대 테이블이 `이자비용`/`사외적립자산` 키워드로 매칭 → 20KB 바스켓 독점 → 가정 테이블(~500B) 누락
+- 결과: OK 1,093사 중 할인율 추출 19.3%, 임금상승률 17.2%
+- v3 테스트 결과: 삼성전자 5→18개 변수 풀추출, 두산건설/경창산업/앤디포스 할인율·임금상승률 정상 추출
 
 ### LLM 프롬프트 주의사항
 
-- **할인율/듀레이션 혼동 방지**: 할인율은 "보험수리적가정 테이블의 할인율/할인률 행"에서, 듀레이션은 "가중평균만기/듀레이션 텍스트"에서 추출하도록 명시
-- **임금상승률 레이블 변형**: 임금상승률, 기대임금상승률, 승급률, 임금인상률 등 다양한 표기 대응
+- **할인율/듀레이션 혼동 방지**: 할인율은 "보험수리적가정 테이블의 할인율/할인률 행"에서, 듀레이션은 "가중평균만기/듀레이션 텍스트"에서 추출하도록 명시. **9% 이상이면 듀레이션 오분류 가능성 재확인** 지시
+- **임금상승률 레이블 변형**: 임금상승률, 기대임금상승률, 승급률, 임금인상률 등 다양한 표기 대응 (프롬프트에 `임금인상률` 명시 추가)
 - **ActuarialGL 하위항목**: 재무적가정(할인율변화효과) / 인구통계적가정 / 경험조정 3개 분리 추출
 
 ### 알려진 이슈
 
-- **JB금융지주/강원랜드**: LLM이 듀레이션(6.11~13.45년)을 할인율로 오분류 → 프롬프트에 출처/레이블 명시로 해결
+- **할인율==듀레이션 오염 13사** (v1 결과): JB금융지주, 대상홀딩스, 아이티센엔텍, 매일유업, 깨끗한나라, 강원랜드, 삼보모터스, 한국알콜, DH오토웨어, 동국산업, JW중외제약, SK증권, 신세계센트럴. LLM이 듀레이션을 할인율로 오분류 → v3 프롬프트에 9% 가드레일 추가
 - **솔트웨어**: 보험수리적가정 테이블이 `임금인상률` 키워드 사용 → `PENSION_KEYWORDS_TABLE`에 미포함으로 발췌 누락 → 키워드 추가로 해결
 - **노무라인터내셔널펀딩피티이(01082834)**: XML 1개(29MB)에 모회사(Nomura Holdings) 20-F 번역본 포함 → 모회사 US GAAP 퇴직연금 데이터(백만엔)를 자사 것으로 오인 추출. SPC/외국법인 필터 필요
 
 ## 알려진 한계 & 주의사항
 
-1. **할인율/듀레이션 커버리지 15~20%**: 주석 XBRL 태깅이 미흡한 기업 다수
+1. **할인율/듀레이션 커버리지**: v1에서 15~20% → v3 발췌 개선으로 재실행 예정
 2. **DBO 순액 혼입**: `dart_PostemploymentBenefitObligations`는 기업에 따라 총액 또는 순액
 3. **Entity 태그**: 기업 자체 정의 → 표준화 안 됨, 매핑 불안정
 4. **lab.tsv 파싱**: 따옴표 문제로 `quoting=csv.QUOTE_NONE` 필수
@@ -272,3 +283,67 @@ dart_ DBO/PA EID:
 - 대용량 TSV 로드 후 반드시 `del df; gc.collect()`
 - `usecols` + `dtype=str`로 메모리 절감
 - 노트북 형태 유지 (val.tsv 2.7GB 재로드 방지)
+
+---
+
+## 향후 계획: 부채 증가율 Projection
+
+### 목적
+
+내년도 DB형 퇴직연금 부채 증가율(%)을 예측 → 자산운용 목표수익률로 설정.
+
+### 접근: 시나리오 테이블 방식
+
+```
+부채증가율 = (SC - BP + IC) / DBO  +  (-Duration × ΔR)
+             ─────────────────────     ────────────────
+             물량 drift (안정적)        시장 효과 (할인율 시나리오)
+```
+
+### Step 1: dart_llm_batch.py 5개년 확장
+
+현재 2024년만 추출 완료 ($15.27). 2020~2023 추가 추출 필요.
+
+**수정 포인트** (최소 변경):
+- `main()`에 year 인자 추가 (CLI: `python dart_llm_batch.py 2023`)
+- OUT_CSV → `llm_extract_{year}.csv` 연도별 분리
+- `rcept_2024` 하드코딩 → `f'rcept_{year}'` 동적 참조
+- `call_llm(tables_text, year)` 결산연도 동적
+
+**비용**: 연도당 ~$15 × 4년 = ~$60 추가
+
+### Step 2: pension_projection.py 신규 작성
+
+5개년 LLM CSV 로드 → drift 추정 → 시나리오 테이블 생성.
+
+**핵심 함수**:
+- `load_multiyear_extracts(years)`: 5개년 CSV 병합, DBO>0 필터
+- `estimate_drift_params(df)`: SC/DBO, BP/DBO, IC/DBO 비율 추정 (연도별 median + DBO 가중평균)
+- `build_scenario_table(drift, duration, shocks)`: 할인율 시나리오별 부채 증가율
+- `validate_reconciliation(df)`: DBO_T ≈ DBO_{T-1} + SC - BP + IC + AGL 검증
+
+**시나리오 테이블 예시**:
+
+| 시나리오 | 할인율변동 | 부채증가율 | → 목표수익률 |
+|---------|----------|----------|------------|
+| 금리 급락 | -100bp | +12~13% | ~12.5% |
+| 금리 하락 | -50bp | +8~9% | ~8.5% |
+| 금리 유지 | 0bp | +5~6% | ~5.5% |
+| 금리 상승 | +50bp | +2~3% | ~2.5% |
+| 금리 급등 | +100bp | -1~0% | ~-0.5% |
+
+**검증 기준**:
+- drift 안정성: SC/DBO, BP/DBO 변동계수 < 0.3
+- reconciliation 잔차: |예측-실제| / 실제 < 5%
+- 금리 유지 시 부채증가율 4~7% 범위 (한국 DB형 경험치)
+
+### 현재 데이터 현황 (2024년 기준)
+
+| 항목 | 값 |
+|------|---|
+| Reconciliation 가능 CIK | ~1,080 (DBO+SC+IC+BP+AGL 모두 보유) |
+| DBO 합계 | ~539조 |
+| SC/DBO | ~12.1% |
+| BP/DBO | ~11.0% |
+| 순 drift | ~+1.1% (+ IC/DBO ≈ 할인율) |
+| Duration (DBO가중, 커버리지 낮음) | 6.71년 |

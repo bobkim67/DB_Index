@@ -43,6 +43,13 @@ PENSION_KEYWORDS_TABLE = [
 # 고신호 키워드: 1개만 매칭돼도 발췌 (오탐 위험 낮음)
 HIGH_SIGNAL_KEYWORDS = ['확정급여채무', '확정급여부채', '사외적립자산', '당기근무원가']
 
+# 가정/듀레이션 키워드: 1개만 매칭돼도 발췌 + 바스켓 우선 담기
+ASSUMPTION_KEYWORDS = [
+    '할인율', '할인률',
+    '임금상승률', '임금상승율', '임금인상률', '임금인상율', '승급률', '승급율',
+    '가중평균만기', '듀레이션',
+]
+
 # 텍스트 단락 발췌용
 PENSION_KEYWORDS_TEXT = [
     '예상기여금', '예상 기여금', '기여금',
@@ -177,19 +184,19 @@ def _clean_table_html(table_html):
 
 
 def extract_pension_tables(content):
-    """XML에서 퇴직연금 관련 TABLE + 텍스트 발췌 (v2)
+    """XML에서 퇴직연금 관련 TABLE + 텍스트 발췌 (v3)
 
-    개선사항:
-    - 키워드 확대 (변동내역 테이블 커버)
-    - 고신호 키워드 1개만으로도 발췌 허용
-    - 단위 탐색 범위 500자로 확대 + 후방 탐색
+    v3 개선:
+    - 가정/듀레이션 키워드 1개 매칭으로 발췌 허용
+    - 가정 테이블을 바스켓에 우선 담기 (할인율/임금상승률 누락 방지)
     """
     table_spans = [(m.start(), m.end())
                    for m in re.finditer(r'<TABLE[^>]*>.*?</TABLE>', content,
                                         re.DOTALL | re.IGNORECASE)]
     tables = [content[s:e] for s, e in table_spans]
 
-    selected = []
+    priority_tables = []   # 가정/듀레이션 테이블 (우선 담기)
+    normal_tables = []     # 나머지 퇴직연금 테이블
     for idx, table_html in enumerate(tables):
         text = re.sub(r'<[^>]+>', ' ', table_html)
         text = re.sub(r'&nbsp;', ' ', text)
@@ -201,18 +208,38 @@ def extract_pension_tables(content):
         # 고신호 키워드 매칭 (1개만으로 충분)
         high_matched = sum(1 for kw in HIGH_SIGNAL_KEYWORDS
                           if kw in text or kw in text_nospace)
+        # 가정/듀레이션 키워드 매칭 (1개만으로 충분)
+        assumption_matched = sum(1 for kw in ASSUMPTION_KEYWORDS
+                                if kw in text or kw in text_nospace)
 
-        if matched >= 2 or high_matched >= 1:
+        if matched >= 2 or high_matched >= 1 or assumption_matched >= 1:
+            # 10KB 이상 테이블 스킵 (재무제표 본문 노이즈 제거)
+            if len(table_html) > 10000:
+                continue
             unit_label = _find_unit_label(content, table_spans[idx][0])
             cleaned = _clean_table_html(table_html)
             prefix = f'[{unit_label}] ' if unit_label else ''
-            selected.append((matched + high_matched * 2, prefix + cleaned))
+            score = matched + high_matched * 2
+            entry = (score, prefix + cleaned)
+            if assumption_matched >= 1:
+                priority_tables.append(entry)
+            else:
+                normal_tables.append(entry)
 
-    selected.sort(key=lambda x: -x[0])
+    # 가정 테이블 먼저, 나머지는 점수 내림차순
+    priority_tables.sort(key=lambda x: -x[0])
+    normal_tables.sort(key=lambda x: -x[0])
 
     result = []
     total_len = 0
-    for _, tbl in selected:
+    # 1) 가정/듀레이션 테이블 우선 담기
+    for _, tbl in priority_tables:
+        if total_len + len(tbl) > 20000 and result:
+            break
+        result.append(tbl)
+        total_len += len(tbl)
+    # 2) 나머지 테이블 채우기
+    for _, tbl in normal_tables:
         if total_len + len(tbl) > 20000 and result:
             break
         result.append(tbl)
@@ -283,8 +310,8 @@ def call_llm(tables_text, year):
 
 [비율/기간 변수 — 범위/단일 구분 필수]
 다음 3개 변수는 범위값과 단일값을 구분하여 반환합니다:
-- DiscountRate: 할인율. 보험수리적가정 테이블의 "할인율/할인률" 행에서 추출. "듀레이션/만기" 숫자와 혼동 금지.
-- SalaryGrowth: 임금상승률. 보험수리적가정 테이블의 "임금상승률/기대임금상승률/승급률" 행에서 추출.
+- DiscountRate: 할인율. 보험수리적가정 테이블의 "할인율/할인률" 행에서 추출. "듀레이션/만기" 숫자와 혼동 금지. 9% 이상이면 듀레이션을 잘못 가져온 것일 수 있으니 재확인.
+- SalaryGrowth: 임금상승률. 보험수리적가정 테이블의 "임금상승률/기대임금상승률/임금인상률/승급률" 행에서 추출.
 - Duration: 확정급여채무 가중평균 듀레이션/만기 (년). "가중평균만기/가중평균듀레이션/듀레이션" 텍스트 또는 테이블에서 추출. 할인율과 혼동 금지.
 
 이 3개 변수는 각각 아래 형태로 반환:
