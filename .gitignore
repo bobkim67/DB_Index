@@ -1,0 +1,22 @@
+# 대용량 TSV 데이터
+2024_4Q/
+2023_4Q/
+2025_4Q/
+
+# 로그
+*.log
+llm_batch_log.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PDF
+*.pdf
