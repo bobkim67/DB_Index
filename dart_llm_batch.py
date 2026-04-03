@@ -14,8 +14,8 @@ import anthropic
 from pathlib import Path
 
 # === 설정 ===
-DART_API_KEY = '56a07e920d1f7f0e9aed6c3bc6a62491c21620c2'
-CLAUDE_API_KEY = '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'
+DART_API_KEY = os.environ.get('DART_API_KEY', '')
+CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', '')
 
 BASE = Path(__file__).parent
 CORP_CSV = BASE / 'corp_5yr_list_v2.csv'
@@ -83,8 +83,10 @@ AMOUNT_VARS = [
     'ActuarialGL_Demographic',  # 인구통계적가정(임금상승) 변동
     'ActuarialGL_Experience',   # 경험조정
     'RetirementBenefitCost', 'ExpectedContribution', 'DCPlanCost',
-    'SensitivityDR_1pct',   # 할인율 1%p 증가시 DBO 변동액
-    'SensitivitySG_1pct',   # 임금상승률 1%p 증가시 DBO 변동액
+    'SensitivityDR_1pct',       # 할인율 1%p 증가시 DBO 변동액
+    'SensitivitySG_1pct',       # 임금상승률 1%p 증가시 DBO 변동액
+    'SensitivityDR_1pct_down',  # 할인율 1%p 감소시 DBO 변동액
+    'SensitivitySG_1pct_down',  # 임금상승률 1%p 감소시 DBO 변동액
 ]
 # 범위 변수 (Min/Max/Mid 3컬럼)
 RANGE_VARS = ['DiscountRate', 'SalaryGrowth', 'Duration']
@@ -517,6 +519,8 @@ def call_llm(tables_text, year):
 - DCPlanCost: 확정기여제도 퇴직급여 비용.
 - SensitivityDR_1pct: 민감도 분석에서 할인율 1%p(또는 1%) 증가시 확정급여채무 변동액. 감소하면 음수. 원 단위 정수.
 - SensitivitySG_1pct: 민감도 분석에서 임금상승률 1%p(또는 1%) 증가시 확정급여채무 변동액. 증가하면 양수. 원 단위 정수.
+- SensitivityDR_1pct_down: 민감도 분석에서 할인율 1%p(또는 1%) 감소시 확정급여채무 변동액. 증가하면 양수. 원 단위 정수.
+- SensitivitySG_1pct_down: 민감도 분석에서 임금상승률 1%p(또는 1%) 감소시 확정급여채무 변동액. 감소하면 음수. 원 단위 정수.
 
 [비율/기간 변수 — 범위/단일 구분 필수]
 다음 3개 변수는 범위값과 단일값을 구분하여 반환합니다:

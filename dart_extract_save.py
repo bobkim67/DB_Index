@@ -16,7 +16,7 @@ from urllib3.util.ssl_ import create_urllib3_context
 sys.stdout.reconfigure(encoding='utf-8')
 
 # === 설정 ===
-DART_API_KEY = '56a07e920d1f7f0e9aed6c3bc6a62491c21620c2'
+DART_API_KEY = os.environ.get('DART_API_KEY', '')
 
 BASE = Path(__file__).parent
 CORP_CSV = BASE / 'corp_5yr_list_v2.csv'
